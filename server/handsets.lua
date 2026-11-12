@@ -191,7 +191,10 @@ local function simNumber()
     for _=1,50 do
         local digits=Config.PhoneNumber.SubscriberDigits
         local n=Config.PhoneNumber.Prefix..string.format('%0'..digits..'d',math.random(0,10^digits-1))
-        if not row('SELECT id FROM phone_sims WHERE phone_number=? LIMIT 1',{n}) then return n end
+        -- Check BOTH number spaces: a number already held by a phone_devices row breaks
+        -- that table's unique index when syncSim writes the SIM number back to it.
+        if not row('SELECT id FROM phone_sims WHERE phone_number=? LIMIT 1',{n})
+            and not row('SELECT id FROM phone_devices WHERE phone_number=? LIMIT 1',{n}) then return n end
     end
     error('Phone number space unavailable')
 end
@@ -451,30 +454,6 @@ KoraPhone.Services.Phone.bootstrap=function(src)
         end
     end
     return result
-end
-local oldPinMatches=KoraPhone.Repositories.Phones.pinMatches
-KoraPhone.Repositories.Phones.pinMatches=function(id,pepper,pin)
-    local h=row('SELECT pin_kdf FROM phone_handsets WHERE device_id=?',{id})
-    if h and h.pin_kdf then return exports[GetCurrentResourceName()]:pinVerify(pin,h.pin_kdf) end
-    return oldPinMatches(id,pepper,pin)
-end
-KoraPhone.Repositories.Phones.setPin=function(id,_,_,pin)
-    local hash=exports[GetCurrentResourceName()]:pinHash(pin)
-    return MySQL.transaction.await({
-        {query='UPDATE phone_handsets SET pin_kdf=?,is_reset=0 WHERE device_id=?',values={hash,id}},
-        {query='UPDATE phone_devices SET pin_hash=NULL,pin_salt=NULL,pin_failed_attempts=0,pin_locked_until=NULL WHERE id=?',values={id}}
-    })
-end
-local oldState=KoraPhone.Repositories.Phones.pinState
-KoraPhone.Repositories.Phones.pinState=function(id)
-    local s=oldState(id); local h=row('SELECT pin_kdf FROM phone_handsets WHERE device_id=?',{id})
-    if s and h and h.pin_kdf then s.hasPin=1 end; return s
-end
-KoraPhone.Repositories.Phones.clearPin=function(id)
-    return MySQL.transaction.await({
-        {query='UPDATE phone_handsets SET pin_kdf=NULL,face_citizenid=NULL WHERE device_id=?',values={id}},
-        {query='UPDATE phone_devices SET pin_hash=NULL,pin_salt=NULL,pin_failed_attempts=0,pin_locked_until=NULL WHERE id=?',values={id}}
-    })
 end
 function H.start()
     local gateway=pcall(function() exports.kora_inventory:PhoneItemTransaction(0,{op='probe'}) end)
