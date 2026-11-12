@@ -9,16 +9,11 @@ end
 
 -- A phone with a PIN refuses requests until the session is unlocked. Answering or ending a
 -- call passes allowLocked so a locked phone can still take a call.
+-- Resolves through the SELECTED handset (Handsets.require), never an unordered
+-- findByCitizenId: with several handsets owned, `LIMIT 1` on owner_citizenid could
+-- return a different handset's device and silently attach app data to it.
 function KoraPhone.Permissions.requireDevice(source, allowLocked)
     local citizenId, err = KoraPhone.Permissions.requirePlayer(source)
     if not citizenId then return nil, err end
-    local device = KoraPhone.Services.Phone.getOrCreate(citizenId)
-    if not device then return nil, PhoneError(PhoneConstants.Errors.INTERNAL, 'Unable to load phone') end
-    if (device.hasPin == 1 or device.hasPin == true) and not allowLocked then
-        local session = KoraPhone.Sessions.bySource[source]
-        if not (session and session.deviceId == device.id and session.unlocked) then
-            return nil, PhoneError(PhoneConstants.Errors.FORBIDDEN, 'Phone is locked')
-        end
-    end
-    return device
+    return KoraPhone.Handsets.require(source, allowLocked)
 end

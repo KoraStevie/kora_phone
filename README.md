@@ -57,8 +57,8 @@ Use the resource names below. The phone integrates with the custom `[v2]` APIs a
 | `kora_core` | Character identity, shared items, jobs and money |
 | `kora_inventory` | Physical handset/SIM ownership and locked inventory changes |
 | `kora_theme` | Shared theme runtime and client bridge |
-| `Kora_voice` | Call audio |
-| `Kora_lib` | Saved in-game photos |
+| `kora_voice` | Call audio |
+| `kora_lib` | Saved in-game photos |
 | **Fivemanage** | Saved photo and message-media hosting |
 
 Live video travels through WebRTC, directly or through your configured TURN relay. It does not use Fivemanage as a streaming service.

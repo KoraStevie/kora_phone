@@ -54,23 +54,32 @@ RegisterNetEvent('kora_phone:client:calls:videoControl',function(control)
     end
 end)
 
+-- Remote mute rides pma-voice's isPlayerMuted/toggleMutePlayer client exports, which
+-- kora_voice deliberately does not provide in either its native or its pma-voice
+-- compat surface. The control stays inert unless a real pma-voice is the provider.
+local function muteResource()
+    local voice = KoraPhone.Voice
+    if not voice or not voice.RemoteMuteResource then return nil end
+    return voice.RemoteMuteResource()
+end
+
 local mutedPeer
 local function clearRemoteMute()
-    if mutedPeer then
-        if GetResourceState('pma-voice')=='started' then
-            local ok,muted=pcall(function() return exports['pma-voice']:isPlayerMuted(mutedPeer) end)
-            if ok and muted then exports['pma-voice']:toggleMutePlayer(mutedPeer) end
-        end
-        mutedPeer=nil
+    local resource = muteResource()
+    if mutedPeer and resource then
+        local ok,muted=pcall(function() return exports[resource]:isPlayerMuted(mutedPeer) end)
+        if ok and muted then pcall(function() exports[resource]:toggleMutePlayer(mutedPeer) end) end
     end
+    mutedPeer=nil
 end
 RegisterNetEvent('kora_phone:client:calls:remoteMute',function(data)
     if not KoraPhone.State.activeCall or type(data)~='table' or KoraPhone.State.activeCall.id~=data.id then return end
     if data.muted then
-        if GetResourceState('pma-voice')~='started' then return end
-        local ok,muted=pcall(function() return exports['pma-voice']:isPlayerMuted(data.source) end)
+        local resource = muteResource()
+        if not resource then return end
+        local ok,muted=pcall(function() return exports[resource]:isPlayerMuted(data.source) end)
         if not ok then return end
-        if not muted then exports['pma-voice']:toggleMutePlayer(data.source); mutedPeer=data.source end
+        if not muted then exports[resource]:toggleMutePlayer(data.source); mutedPeer=data.source end
     else clearRemoteMute() end
 end)
 
