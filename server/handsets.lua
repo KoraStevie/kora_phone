@@ -329,7 +329,7 @@ function H.action(src,p)
             if Config.Handsets[i.name] then phones[#phones+1]={slot=i.slot,model=Config.Handsets[i.name],id=i.info and i.info.handsetId} end
             if i.name==Config.SimItem then sims[#sims+1]={slot=i.slot,id=i.info and i.info.simId} end
         end
-        for id,w in pairs(Config.PhoneServices.wifi) do if near(src,w.coords,w.radius,w.bucket) then hotspots[#hotspots+1]={id=id,label=w.label,private=w.passwordConvar~=nil} end end
+        for id,w in pairs(Config.PhoneServices.wifi) do if near(src,w.coords,w.radius,w.bucket) then hotspots[#hotspots+1]={id=id,label=w.label,private=w.ownerJob~=nil} end end
         for id,s in pairs(Config.PhoneServices.shops) do if shop(src,id,false) then shops[#shops+1]={id=id,label=s.label,prices=s.prices,business=s.job~=nil} end end
         return PhoneResult({handset={id=d.handsetId,model=d.model},cellular=d.cellular,number=d.cellular and d.phoneNumber or '',
             sim=d.sim and {id=d.sim.id,status=d.sim.status},accountId=d.accountId,faceId=d.faceCitizenId~=nil,
@@ -346,7 +346,11 @@ function H.action(src,p)
     elseif op=='wifi' then
         local w=type(p.id)=='string' and Config.PhoneServices.wifi[p.id]
         if not w or not near(src,w.coords,w.radius,w.bucket) then return fail('Wi-Fi is out of range') end
-        if w.passwordConvar and (GetConvar(w.passwordConvar,'')=='' or p.password~=GetConvar(w.passwordConvar,'')) then return fail('Incorrect Wi-Fi password') end
+        -- Job-owned hotspots stay locked until their boss sets a password; public hotspots need none.
+        if w.ownerJob then
+            local ok=MySQL.scalar.await('SELECT 1 FROM phone_wifi_passwords WHERE wifi_id=? AND password_hash=SHA2(?,256)',{p.id,type(p.password)=='string' and p.password or ''})
+            if not ok then return fail('Incorrect Wi-Fi password') end
+        end
         H.wifi[src]=p.id; return PhoneResult(true)
     elseif op=='insertSim' or op=='removeSim' then
         if op=='insertSim' and d.sim then return fail('Remove the current SIM first') end
@@ -458,6 +462,14 @@ end
 function H.start()
     local gateway=pcall(function() exports.kora_inventory:PhoneItemTransaction(0,{op='probe'}) end)
     if not gateway then error('Install the kora_inventory PhoneItemTransaction companion before starting kora_phone') end
+    -- Job-owned Wi-Fi passwords live in their own table; create it lazily so schema.lua stays untouched.
+    MySQL.update.await([[CREATE TABLE IF NOT EXISTS phone_wifi_passwords (
+        wifi_id VARCHAR(64) NOT NULL,
+        password_hash CHAR(64) NOT NULL,
+        set_by_citizenid VARCHAR(64) NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (wifi_id)
+    )]])
     for name,model in pairs(Config.Handsets) do
         exports.kora_core:registerShared('items',name,{name=name,label=({standard='Orchard One',flip='Circuit Flip',fold='Atlas Fold'})[model],weight=250,type='item',image='phone.png',unique=true,useable=true,shouldClose=true,description='Personal handset'})
         exports.kora_core:createUseable(name,function(src,item)
@@ -487,6 +499,27 @@ AddEventHandler('onResourceStop',function(resource)
     if resource==GetCurrentResourceName() and H.subscription then exports.kora_core:offChange(H.subscription) end
     if resource==GetCurrentResourceName() and H.deathSubscription then exports.kora_core:offChange(H.deathSubscription) end
 end)
+RegisterCommand('setwifipassword',function(source,args)
+    if source==0 then return print('[kora_phone] /setwifipassword must be run by a player') end
+    local id,password=args[1],args[2]
+    local w=type(id)=='string' and Config.PhoneServices.wifi[id]
+    if not w or not w.ownerJob then
+        return TriggerClientEvent('chat:addMessage',source,{args={'^1[kora_phone]^7 Unknown Wi-Fi network'}})
+    end
+    if not near(source,w.coords,w.radius,w.bucket) then
+        return TriggerClientEvent('chat:addMessage',source,{args={'^1[kora_phone]^7 You are not near that Wi-Fi network'}})
+    end
+    local pl=KoraPhone.GetPlayer(source); local j=pl and pl.job
+    if not j or j.name~=w.ownerJob or not j.onduty or (j.grade and j.grade.level or 0)<(w.ownerGrade or 2) then
+        return TriggerClientEvent('chat:addMessage',source,{args={'^1[kora_phone]^7 Only the network owner can set this password'}})
+    end
+    if type(password)~='string' or #password<4 or #password>64 then
+        return TriggerClientEvent('chat:addMessage',source,{args={'^1[kora_phone]^7 Usage: /setwifipassword <wifiId> <password> (4-64 characters)'}})
+    end
+    MySQL.update.await([[INSERT INTO phone_wifi_passwords(wifi_id,password_hash,set_by_citizenid) VALUES(?,SHA2(?,256),?)
+        ON DUPLICATE KEY UPDATE password_hash=SHA2(?,256),set_by_citizenid=VALUES(set_by_citizenid)]],{id,password,cid(source),password,cid(source)})
+    TriggerClientEvent('chat:addMessage',source,{args={'^2[kora_phone]^7 Wi-Fi password updated'}})
+end,false)
 exports('CanResellHandset',function(src,slot)
     local item=exports.kora_core:getItemBySlot(src,slot)
     local d=item and item.info and item.info.handsetId and phoneRow(item.info.handsetId)

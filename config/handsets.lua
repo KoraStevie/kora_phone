@@ -37,6 +37,6 @@ Config.PhoneServices = {
     wifi = {
         legion = { label='Legion Public Wi-Fi', coords={x=215.8,y=-810.1,z=30.7}, radius=70, bucket=0 },
         workshop = { label='Workshop Private', coords={x=-40.1,y=-1090.7,z=26.4}, radius=25, bucket=0,
-            passwordConvar='kora_phone_workshop_wifi_password', ownerJob='mechanic' }
+            ownerJob='mechanic', ownerGrade=2 }
     }
 }
